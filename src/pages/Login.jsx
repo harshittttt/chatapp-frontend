@@ -11,6 +11,7 @@ import {
   Typography,
 } from "@mui/material";
 import axios from "axios";
+axios.defaults.withCredentials = true;
 import React, { useState } from "react";
 import toast from "react-hot-toast";
 import { useDispatch } from "react-redux";
