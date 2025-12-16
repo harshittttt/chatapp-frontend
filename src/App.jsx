@@ -30,8 +30,20 @@ const App = () => {
   const dispatch = useDispatch();
 
   useEffect(() => {
+    const token = localStorage.getItem("chattu-token");
+    
+    const config = {
+      withCredentials: true,
+      headers: {}
+    };
+    
+    // Add Authorization header if token exists in localStorage
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    
     axios
-      .get(`${server}/api/v1/user/me`, { withCredentials: true })
+      .get(`${server}/api/v1/user/me`, config)
       .then(({ data }) => dispatch(userExists(data.user)))
       .catch((err) => dispatch(userNotExists()));
   }, [dispatch]);
