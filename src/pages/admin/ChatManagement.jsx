@@ -7,6 +7,7 @@ import Table from "../../components/shared/Table";
 import { server } from "../../constants/config";
 import { useErrors } from "../../hooks/hook";
 import { transformImage } from "../../lib/features";
+import { useAdminFetchData } from "../../hooks/adminHook";
 
 const columns = [
   {
@@ -72,7 +73,7 @@ const columns = [
 ];
 
 const ChatManagement = () => {
-  const { loading, data, error } = useFetchData(
+  const { loading, data, error } = useAdminFetchData(
     `${server}/api/v1/admin/chats`,
     "dashboard-chats"
   );

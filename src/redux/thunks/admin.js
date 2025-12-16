@@ -5,7 +5,6 @@ import axios from "axios";
 const adminLogin = createAsyncThunk("admin/login", async (secretKey) => {
   try {
     const config = {
-      withCredentials: true,
       headers: {
         "Content-Type": "application/json",
       },
@@ -17,6 +16,11 @@ const adminLogin = createAsyncThunk("admin/login", async (secretKey) => {
       config
     );
 
+    // Store admin token in localStorage
+    if (data.token) {
+      localStorage.setItem("chattu-admin-token", data.token);
+    }
+
     return data.message;
   } catch (error) {
     throw error.response.data.message;
@@ -25,8 +29,12 @@ const adminLogin = createAsyncThunk("admin/login", async (secretKey) => {
 
 const getAdmin = createAsyncThunk("admin/getAdmin", async () => {
   try {
+    const token = localStorage.getItem("chattu-admin-token");
+    
     const { data } = await axios.get(`${server}/api/v1/admin/`, {
-      withCredentials: true,
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
     });
 
     return data.admin;
@@ -37,9 +45,16 @@ const getAdmin = createAsyncThunk("admin/getAdmin", async () => {
 
 const adminLogout = createAsyncThunk("admin/logout", async () => {
   try {
+    const token = localStorage.getItem("chattu-admin-token");
+    
     const { data } = await axios.get(`${server}/api/v1/admin/logout`, {
-      withCredentials: true,
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
     });
+
+    // Remove admin token from localStorage
+    localStorage.removeItem("chattu-admin-token");
 
     return data.message;
   } catch (error) {

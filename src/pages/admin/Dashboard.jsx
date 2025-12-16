@@ -25,9 +25,10 @@ import {
 import { matBlack } from "../../constants/color";
 import { server } from "../../constants/config";
 import { useErrors } from "../../hooks/hook";
+import { useAdminFetchData } from "../../hooks/adminHook";
 
 const Dashboard = () => {
-  const { loading, data, error } = useFetchData(
+  const { loading, data, error } = useAdminFetchData(
     `${server}/api/v1/admin/stats`,
     "dashboard-stats"
   );
