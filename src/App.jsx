@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import ProtectRoute from "./components/auth/ProtectRoute";
 import { LayoutLoader } from "./components/layout/Loaders";
 import axios from "axios";
-axios.defaults.withCredentials = true;
 import { server } from "./constants/config";
 import { useDispatch, useSelector } from "react-redux";
 import { userExists, userNotExists } from "./redux/reducers/auth";
@@ -33,7 +32,6 @@ const App = () => {
     const token = localStorage.getItem("chattu-token");
     
     const config = {
-      withCredentials: true,
       headers: {}
     };
     

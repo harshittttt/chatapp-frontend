@@ -5,7 +5,6 @@ const api = createApi({
   reducerPath: "api",
   baseQuery: fetchBaseQuery({ 
     baseUrl: `${server}/api/v1/`,
-    credentials: "include",
     prepareHeaders: (headers) => {
       const token = localStorage.getItem("chattu-token");
       if (token) {

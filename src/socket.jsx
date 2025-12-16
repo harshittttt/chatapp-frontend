@@ -10,7 +10,6 @@ const SocketProvider = ({ children }) => {
   const socket = useMemo(() => {
     const token = localStorage.getItem("chattu-token");
     return io(server, { 
-      withCredentials: true,
       auth: {
         token: token
       }

@@ -11,7 +11,6 @@ import {
   Typography,
 } from "@mui/material";
 import axios from "axios";
-axios.defaults.withCredentials = true;
 import React, { useState } from "react";
 import toast from "react-hot-toast";
 import { useDispatch } from "react-redux";
@@ -43,7 +42,6 @@ const Login = () => {
 
     setIsLoading(true);
     const config = {
-      withCredentials: true,
       headers: {
         "Content-Type": "application/json",
       },
@@ -89,7 +87,6 @@ const Login = () => {
     formData.append("password", password.value);
 
     const config = {
-      withCredentials: true,
       headers: {
         "Content-Type": "multipart/form-data",
       },
