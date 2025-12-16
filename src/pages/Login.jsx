@@ -47,9 +47,7 @@ const Login = () => {
       headers: {
         "Content-Type": "application/json",
       },
-    };
-
-    try {
+    };    try {
       const { data } = await axios.post(
         `${server}/api/v1/user/login`,
         {
@@ -58,6 +56,12 @@ const Login = () => {
         },
         config
       );
+      
+      // Store token in localStorage as fallback for cross-origin cookie issues
+      if (data.token) {
+        localStorage.setItem("chattu-token", data.token);
+      }
+      
       dispatch(userExists(data.user));
       toast.success(data.message, {
         id: toastId,
@@ -89,14 +93,17 @@ const Login = () => {
       headers: {
         "Content-Type": "multipart/form-data",
       },
-    };
-
-    try {
+    };    try {
       const { data } = await axios.post(
         `${server}/api/v1/user/new`,
         formData,
         config
       );
+
+      // Store token in localStorage as fallback for cross-origin cookie issues
+      if (data.token) {
+        localStorage.setItem("chattu-token", data.token);
+      }
 
       dispatch(userExists(data.user));
       toast.success(data.message, {

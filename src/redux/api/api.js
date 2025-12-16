@@ -3,7 +3,17 @@ import { server } from "../../constants/config";
 
 const api = createApi({
   reducerPath: "api",
-  baseQuery: fetchBaseQuery({ baseUrl: `${server}/api/v1/` }),
+  baseQuery: fetchBaseQuery({ 
+    baseUrl: `${server}/api/v1/`,
+    credentials: "include",
+    prepareHeaders: (headers) => {
+      const token = localStorage.getItem("chattu-token");
+      if (token) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+      return headers;
+    },
+  }),
   tagTypes: ["Chat", "User", "Message"],
 
   endpoints: (builder) => ({

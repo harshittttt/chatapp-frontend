@@ -60,12 +60,15 @@ const Header = () => {
   };
 
   const navigateToGroup = () => navigate("/groups");
-
   const logoutHandler = async () => {
     try {
       const { data } = await axios.get(`${server}/api/v1/user/logout`, {
         withCredentials: true,
       });
+      
+      // Clear token from localStorage
+      localStorage.removeItem("chattu-token");
+      
       dispatch(userNotExists());
       toast.success(data.message);
     } catch (error) {
