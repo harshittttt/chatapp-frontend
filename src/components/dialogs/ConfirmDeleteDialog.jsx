@@ -8,13 +8,13 @@ import {
 } from "@mui/material";
 import React from "react";
 
-const ConfirmDeleteDialog = ({ open, handleClose, deleteHandler }) => {
+const ConfirmDeleteDialog = ({ open, handleClose, deleteHandler, text }) => {
   return (
     <Dialog open={open} onClose={handleClose}>
       <DialogTitle>Confirm Delete</DialogTitle>
       <DialogContent>
         <DialogContentText>
-          Are you sure you want to delete this group?
+          {text || "Are you sure you want to delete this group?"}
         </DialogContentText>
       </DialogContent>
       <DialogActions>

@@ -6,15 +6,24 @@ import React, {
   useState,
 } from "react";
 import AppLayout from "../components/layout/AppLayout";
-import { IconButton, Skeleton, Stack } from "@mui/material";
+import { IconButton, Skeleton, Stack, Tooltip, Box } from "@mui/material";
 import { grayColor, orange } from "../constants/color";
 import {
   AttachFile as AttachFileIcon,
   Send as SendIcon,
+  SmartToy as AIIcon,
+  AutoFixHigh as ImproveIcon,
+  Summarize as SummarizeIcon,
 } from "@mui/icons-material";
 import { InputBox } from "../components/styles/StyledComponents";
 import FileMenu from "../components/dialogs/FileMenu";
 import MessageComponent from "../components/shared/MessageComponent";
+import AIChatAssistant from "../components/dialogs/AIChatAssistant";
+import MessageImprover from "../components/dialogs/MessageImprover";
+import ChatSummarizer from "../components/dialogs/ChatSummarizer";
+import SmartReplies from "../components/dialogs/SmartReplies";
+import EditMessageDialog from "../components/dialogs/EditMessageDialog";
+import ConfirmDeleteDialog from "../components/dialogs/ConfirmDeleteDialog";
 import { getSocket } from "../socket";
 import {
   ALERT,
@@ -23,6 +32,8 @@ import {
   NEW_MESSAGE,
   START_TYPING,
   STOP_TYPING,
+  MESSAGE_DELETED,
+  MESSAGE_UPDATED,
 } from "../constants/events";
 import { useChatDetailsQuery, useGetMessagesQuery } from "../redux/api/api";
 import { useErrors, useSocketEvents } from "../hooks/hook";
@@ -32,6 +43,8 @@ import { setIsFileMenu } from "../redux/reducers/misc";
 import { removeNewMessagesAlert } from "../redux/reducers/chat";
 import { TypingLoader } from "../components/layout/Loaders";
 import { useNavigate } from "react-router-dom";
+import { useAI } from "../hooks/useAI";
+import { useMessageActions } from "../hooks/useMessageActions";
 
 const Chat = ({ chatId, user }) => {
   const socket = getSocket();
@@ -40,7 +53,6 @@ const Chat = ({ chatId, user }) => {
 
   const containerRef = useRef(null);
   const bottomRef = useRef(null);
-
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [page, setPage] = useState(1);
@@ -49,6 +61,24 @@ const Chat = ({ chatId, user }) => {
   const [IamTyping, setIamTyping] = useState(false);
   const [userTyping, setUserTyping] = useState(false);
   const typingTimeout = useRef(null);
+
+  // AI Features State
+  const [showAIAssistant, setShowAIAssistant] = useState(false);
+  const [showMessageImprover, setShowMessageImprover] = useState(false);
+  const [showSummarizer, setShowSummarizer] = useState(false);
+  const [smartReplies, setSmartReplies] = useState([]);
+  const { getSmartReplies, loading: aiLoading } = useAI();
+
+  const { updateMessage: updateMessageApi, deleteMessage: deleteMessageApi } =
+    useMessageActions();
+
+  const [messageToEdit, setMessageToEdit] = useState(null);
+  const [messageToDelete, setMessageToDelete] = useState(null);
+  const [showEditMessage, setShowEditMessage] = useState(false);
+  const [showDeleteMessage, setShowDeleteMessage] = useState(false);
+
+  // Track the last message we generated smart replies for (prevents repeated API calls)
+  const lastSmartReplyForMessageIdRef = useRef(null);
 
   const chatDetails = useChatDetailsQuery({ chatId, skip: !chatId });
 
@@ -68,6 +98,9 @@ const Chat = ({ chatId, user }) => {
   ];
 
   const members = chatDetails?.data?.chat?.members;
+
+  // Combine messages early so hooks below can safely reference it
+  const allMessages = [...oldMessages, ...messages];
 
   const messageOnChange = (e) => {
     setMessage(e.target.value);
@@ -89,7 +122,6 @@ const Chat = ({ chatId, user }) => {
     dispatch(setIsFileMenu(true));
     setFileMenuAnchor(e.currentTarget);
   };
-
   const submitHandler = (e) => {
     e.preventDefault();
 
@@ -98,7 +130,37 @@ const Chat = ({ chatId, user }) => {
     // Emitting the message to the server
     socket.emit(NEW_MESSAGE, { chatId, members, message });
     setMessage("");
+    setSmartReplies([]); // Clear smart replies after sending
   };
+
+  // Load smart replies when messages change
+  useEffect(() => {
+    const loadSmartReplies = async () => {
+      if (!chatId) return;
+
+      const lastMsg = allMessages?.[allMessages.length - 1];
+      if (!lastMsg?._id) return;
+
+      // Only generate replies when the latest message is from the OTHER user (receiver)
+      if (lastMsg?.sender?._id === user?._id) {
+        setSmartReplies([]);
+        lastSmartReplyForMessageIdRef.current = lastMsg._id;
+        return;
+      }
+
+      // Do not regenerate for the same last message
+      if (lastSmartReplyForMessageIdRef.current === lastMsg._id) return;
+      lastSmartReplyForMessageIdRef.current = lastMsg._id;
+
+      const replies = await getSmartReplies(chatId);
+      setSmartReplies(replies);
+    };
+
+    // small debounce
+    const timer = setTimeout(loadSmartReplies, 800);
+    return () => clearTimeout(timer);
+    // IMPORTANT: depend on allMessages length and last message id
+  }, [chatId, user?._id, allMessages?.length, allMessages?.[allMessages.length - 1]?._id]);
 
   useEffect(() => {
     socket.emit(CHAT_JOINED, { userId: user._id, members });
@@ -118,6 +180,14 @@ const Chat = ({ chatId, user }) => {
       bottomRef.current.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // When Smart Replies appear/disappear, keep the view pinned to the bottom
+  // so the last message isn't hidden and user doesn't need to manually scroll.
+  useEffect(() => {
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [smartReplies.length]);
+
   useEffect(() => {
     if (chatDetails.isError) return navigate("/");
   }, [chatDetails.isError]);
@@ -134,7 +204,6 @@ const Chat = ({ chatId, user }) => {
   const startTypingListener = useCallback(
     (data) => {
       if (data.chatId !== chatId) return;
-
       setUserTyping(true);
     },
     [chatId]
@@ -146,6 +215,37 @@ const Chat = ({ chatId, user }) => {
       setUserTyping(false);
     },
     [chatId]
+  );
+
+  const messageUpdatedListener = useCallback(
+    (data) => {
+      if (data?.chatId !== chatId) return;
+      const updated = data?.message;
+      if (!updated?._id) return;
+
+      // update in real-time list
+      setMessages((prev) =>
+        prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
+      );
+
+      // update in oldMessages cache too
+      setOldMessages((prev) =>
+        prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
+      );
+    },
+    [chatId, setOldMessages]
+  );
+
+  const messageDeletedListener = useCallback(
+    (data) => {
+      if (data?.chatId !== chatId) return;
+      const messageId = data?.messageId;
+      if (!messageId) return;
+
+      setMessages((prev) => prev.filter((m) => m._id !== messageId));
+      setOldMessages((prev) => prev.filter((m) => m._id !== messageId));
+    },
+    [chatId, setOldMessages]
   );
 
   const alertListener = useCallback(
@@ -171,13 +271,41 @@ const Chat = ({ chatId, user }) => {
     [NEW_MESSAGE]: newMessagesListener,
     [START_TYPING]: startTypingListener,
     [STOP_TYPING]: stopTypingListener,
+    [MESSAGE_UPDATED]: messageUpdatedListener,
+    [MESSAGE_DELETED]: messageDeletedListener,
   };
 
   useSocketEvents(socket, eventHandler);
 
   useErrors(errors);
 
-  const allMessages = [...oldMessages, ...messages];
+  const onEditMessage = (msg) => {
+    setMessageToEdit(msg);
+    setShowEditMessage(true);
+  };
+
+  const onDeleteMessage = (msg) => {
+    setMessageToDelete(msg);
+    setShowDeleteMessage(true);
+  };
+
+  const handleSaveEditedMessage = async (newContent) => {
+    if (!messageToEdit?._id) return;
+    const res = await updateMessageApi(messageToEdit._id, newContent);
+    if (res?.success) {
+      setShowEditMessage(false);
+      setMessageToEdit(null);
+    }
+  };
+
+  const handleConfirmDeleteMessage = async () => {
+    if (!messageToDelete?._id) return;
+    const res = await deleteMessageApi(messageToDelete._id);
+    if (res?.success) {
+      setShowDeleteMessage(false);
+      setMessageToDelete(null);
+    }
+  };
 
   return chatDetails.isLoading ? (
     <Skeleton />
@@ -193,10 +321,18 @@ const Chat = ({ chatId, user }) => {
         sx={{
           overflowX: "hidden",
           overflowY: "auto",
+          // When Smart Replies are shown (overlay), reserve space so the last message isn't hidden.
+          pb: smartReplies.length > 0 ? 10 : 0,
         }}
       >
         {allMessages.map((i) => (
-          <MessageComponent key={i._id} message={i} user={user} />
+          <MessageComponent
+            key={i._id}
+            message={i}
+            user={user}
+            onEdit={onEditMessage}
+            onDelete={onDeleteMessage}
+          />
         ))}
 
         {userTyping && <TypingLoader />}
@@ -204,12 +340,61 @@ const Chat = ({ chatId, user }) => {
         <div ref={bottomRef} />
       </Stack>
 
+      <EditMessageDialog
+        open={showEditMessage}
+        onClose={() => {
+          setShowEditMessage(false);
+          setMessageToEdit(null);
+        }}
+        initialValue={messageToEdit?.content || ""}
+        onSave={handleSaveEditedMessage}
+      />
+
+      <ConfirmDeleteDialog
+        open={showDeleteMessage}
+        handleClose={() => {
+          setShowDeleteMessage(false);
+          setMessageToDelete(null);
+        }}
+        deleteHandler={handleConfirmDeleteMessage}
+        text="Are you sure you want to delete this message?"
+      />
+
       <form
         style={{
           height: "10%",
+          position: "relative", // constrain absolute Smart Replies to the chat section
         }}
         onSubmit={submitHandler}
       >
+        {/* Smart Replies */}
+        {smartReplies.length > 0 && (
+          <Box
+            sx={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: "100%", // place directly above the form (input bar)
+              px: 2,
+              pb: 1,
+              zIndex: 2,
+              pointerEvents: "none",
+            }}
+          >
+            <Box sx={{ pointerEvents: "auto" }}>
+              <SmartReplies
+                suggestions={smartReplies}
+                loading={aiLoading}
+                onClose={() => setSmartReplies([])}
+                onSelectReply={(reply) => {
+                  setMessage(reply);
+                  setSmartReplies([]);
+                }}
+              />
+            </Box>
+          </Box>
+        )}
+
         <Stack
           direction={"row"}
           height={"100%"}
@@ -217,30 +402,78 @@ const Chat = ({ chatId, user }) => {
           alignItems={"center"}
           position={"relative"}
         >
-          <IconButton
-            sx={{
-              position: "absolute",
-              left: "1.5rem",
-              rotate: "30deg",
-            }}
-            onClick={handleFileOpen}
-          >
-            <AttachFileIcon />
-          </IconButton>
+          {/* AI Assistant Button */}
+          <Tooltip title="AI Assistant">
+            <IconButton
+              sx={{
+                position: "absolute",
+                left: "1.5rem",
+                color: "#667eea",
+              }}
+              onClick={() => setShowAIAssistant(true)}
+            >
+              <AIIcon />
+            </IconButton>
+          </Tooltip>
+
+          {/* Attach File Button */}
+          <Tooltip title="Attach File">
+            <IconButton
+              sx={{
+                position: "absolute",
+                left: "4rem",
+                rotate: "30deg",
+              }}
+              onClick={handleFileOpen}
+            >
+              <AttachFileIcon />
+            </IconButton>
+          </Tooltip>
+
+          {/* Summarize Chat Button */}
+          <Tooltip title="Summarize Chat">
+            <IconButton
+              sx={{
+                position: "absolute",
+                left: "6.5rem",
+                color: "#f59e0b",
+              }}
+              onClick={() => setShowSummarizer(true)}
+            >
+              <SummarizeIcon />
+            </IconButton>
+          </Tooltip>
 
           <InputBox
             placeholder="Type Message Here..."
             value={message}
             onChange={messageOnChange}
+            style={{ marginLeft: "8rem" }}
           />
 
+          {/* Improve Message Button */}
+          {message.trim() && (
+            <Tooltip title="Improve Message">
+              <IconButton
+                sx={{
+                  color: "#10b981",
+                  marginLeft: "0.5rem",
+                }}
+                onClick={() => setShowMessageImprover(true)}
+              >
+                <ImproveIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+
+          {/* Send Button */}
           <IconButton
             type="submit"
             sx={{
               rotate: "-30deg",
               bgcolor: orange,
               color: "white",
-              marginLeft: "1rem",
+              marginLeft: "0.5rem",
               padding: "0.5rem",
               "&:hover": {
                 bgcolor: "error.dark",
@@ -253,6 +486,26 @@ const Chat = ({ chatId, user }) => {
       </form>
 
       <FileMenu anchorE1={fileMenuAnchor} chatId={chatId} />
+
+      {/* AI Dialogs */}
+      <AIChatAssistant
+        open={showAIAssistant}
+        onClose={() => setShowAIAssistant(false)}
+        chatId={chatId}
+      />
+
+      <MessageImprover
+        open={showMessageImprover}
+        onClose={() => setShowMessageImprover(false)}
+        originalMessage={message}
+        onUseImproved={(improved) => setMessage(improved)}
+      />
+
+      <ChatSummarizer
+        open={showSummarizer}
+        onClose={() => setShowSummarizer(false)}
+        chatId={chatId}
+      />
     </Fragment>
   );
 };
