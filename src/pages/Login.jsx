@@ -56,8 +56,9 @@ const Login = () => {
       );
       
       // Store token in localStorage as fallback for cross-origin cookie issues
-      if (data.token) {
-        localStorage.setItem("chattu-token", data.token);
+      localStorage.setItem("chattu-token", data.token || data.accessToken);
+      if (data.refreshToken) {
+        localStorage.setItem("chattu-refresh-token", data.refreshToken);
       }
       
       dispatch(userExists(data.user));
@@ -98,8 +99,9 @@ const Login = () => {
       );
 
       // Store token in localStorage as fallback for cross-origin cookie issues
-      if (data.token) {
-        localStorage.setItem("chattu-token", data.token);
+      localStorage.setItem("chattu-token", data.token || data.accessToken);
+      if (data.refreshToken) {
+        localStorage.setItem("chattu-refresh-token", data.refreshToken);
       }
 
       dispatch(userExists(data.user));

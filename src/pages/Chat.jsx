@@ -34,6 +34,9 @@ import {
   STOP_TYPING,
   MESSAGE_DELETED,
   MESSAGE_UPDATED,
+  MESSAGE_REACTION_UPDATED,
+  MESSAGE_DELIVERED,
+  MESSAGE_SEEN,
 } from "../constants/events";
 import { useChatDetailsQuery, useGetMessagesQuery } from "../redux/api/api";
 import { useErrors, useSocketEvents } from "../hooks/hook";
@@ -45,6 +48,8 @@ import { TypingLoader } from "../components/layout/Loaders";
 import { useNavigate } from "react-router-dom";
 import { useAI } from "../hooks/useAI";
 import { useMessageActions } from "../hooks/useMessageActions";
+import { useReactions } from "../hooks/useReactions";
+import { useReceipts } from "../hooks/useReceipts";
 
 const Chat = ({ chatId, user }) => {
   const socket = getSocket();
@@ -72,6 +77,8 @@ const Chat = ({ chatId, user }) => {
   const { updateMessage: updateMessageApi, deleteMessage: deleteMessageApi } =
     useMessageActions();
 
+  const { upsertReaction, removeReaction } = useReactions();
+
   const [messageToEdit, setMessageToEdit] = useState(null);
   const [messageToDelete, setMessageToDelete] = useState(null);
   const [showEditMessage, setShowEditMessage] = useState(false);
@@ -98,9 +105,29 @@ const Chat = ({ chatId, user }) => {
   ];
 
   const members = chatDetails?.data?.chat?.members;
+  const chatMemberCount = Array.isArray(members) ? members.length : undefined;
 
   // Combine messages early so hooks below can safely reference it
   const allMessages = [...oldMessages, ...messages];
+
+  const { markDelivered, markSeen } = useReceipts();
+
+  // When chat opens / messages update, mark latest incoming messages delivered/seen
+  useEffect(() => {
+    const run = async () => {
+      if (!chatId || !user?._id) return;
+      const last = allMessages?.[allMessages.length - 1];
+      if (!last?._id) return;
+
+      // Only for messages sent by others
+      if (last?.sender?._id && last.sender._id !== user._id) {
+        await markDelivered(last._id);
+        await markSeen(last._id);
+      }
+    };
+
+    run();
+  }, [chatId, user?._id, allMessages?.length]);
 
   const messageOnChange = (e) => {
     setMessage(e.target.value);
@@ -248,6 +275,72 @@ const Chat = ({ chatId, user }) => {
     [chatId, setOldMessages]
   );
 
+  const messageReactionUpdatedListener = useCallback(
+    (data) => {
+      if (data?.chatId !== chatId) return;
+      const messageId = data?.messageId;
+      if (!messageId) return;
+
+      // Server now sends full summary -> update instantly
+      if (Array.isArray(data?.reactions)) {
+        const apply = (arr) =>
+          arr.map((m) =>
+            m._id !== messageId ? m : { ...m, reactions: data.reactions }
+          );
+
+        setMessages((prev) => apply(prev));
+        setOldMessages((prev) => apply(prev));
+        return;
+      }
+
+      // Fallback: refetch if payload doesn't include summary
+      oldMessagesChunk?.refetch?.();
+    },
+    [chatId, oldMessagesChunk, setOldMessages]
+  );
+
+  const messageDeliveredListener = useCallback(
+    (data) => {
+      if (data?.chatId !== chatId) return;
+      const { messageId, userId } = data;
+      if (!messageId || !userId) return;
+
+      const apply = (arr) =>
+        arr.map((m) =>
+          m._id !== messageId
+            ? m
+            : { ...m, deliveredTo: Array.from(new Set([...(m.deliveredTo || []), userId])) }
+        );
+
+      setMessages((prev) => apply(prev));
+      setOldMessages((prev) => apply(prev));
+    },
+    [chatId, setOldMessages]
+  );
+
+  const messageSeenListener = useCallback(
+    (data) => {
+      if (data?.chatId !== chatId) return;
+      const { messageId, userId } = data;
+      if (!messageId || !userId) return;
+
+      const apply = (arr) =>
+        arr.map((m) =>
+          m._id !== messageId
+            ? m
+            : {
+                ...m,
+                deliveredTo: Array.from(new Set([...(m.deliveredTo || []), userId])),
+                seenBy: Array.from(new Set([...(m.seenBy || []), userId])),
+              }
+        );
+
+      setMessages((prev) => apply(prev));
+      setOldMessages((prev) => apply(prev));
+    },
+    [chatId, setOldMessages]
+  );
+
   const alertListener = useCallback(
     (data) => {
       if (data.chatId !== chatId) return;
@@ -273,6 +366,9 @@ const Chat = ({ chatId, user }) => {
     [STOP_TYPING]: stopTypingListener,
     [MESSAGE_UPDATED]: messageUpdatedListener,
     [MESSAGE_DELETED]: messageDeletedListener,
+    [MESSAGE_REACTION_UPDATED]: messageReactionUpdatedListener,
+    [MESSAGE_DELIVERED]: messageDeliveredListener,
+    [MESSAGE_SEEN]: messageSeenListener,
   };
 
   useSocketEvents(socket, eventHandler);
@@ -287,6 +383,22 @@ const Chat = ({ chatId, user }) => {
   const onDeleteMessage = (msg) => {
     setMessageToDelete(msg);
     setShowDeleteMessage(true);
+  };
+
+  const onReactMessage = async (msg, emoji) => {
+    if (!msg?._id) return;
+
+    // UI restriction also exists in MessageComponent, but keep a guard here too
+    if (msg?.sender?._id === user?._id) return;
+
+    const res = await upsertReaction({ messageId: msg._id, emoji });
+
+    if (res?.reactions && Array.isArray(res.reactions)) {
+      const apply = (arr) =>
+        arr.map((m) => (m._id !== msg._id ? m : { ...m, reactions: res.reactions }));
+      setMessages((prev) => apply(prev));
+      setOldMessages((prev) => apply(prev));
+    }
   };
 
   const handleSaveEditedMessage = async (newContent) => {
@@ -332,6 +444,8 @@ const Chat = ({ chatId, user }) => {
             user={user}
             onEdit={onEditMessage}
             onDelete={onDeleteMessage}
+            onReact={onReactMessage}
+            chatMemberCount={chatMemberCount}
           />
         ))}
 

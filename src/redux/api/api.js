@@ -1,18 +1,56 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import { server } from "../../constants/config";
 
+const rawBaseQuery = fetchBaseQuery({
+  baseUrl: `${server}/api/v1/`,
+  prepareHeaders: (headers) => {
+    const token = localStorage.getItem("chattu-token");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return headers;
+  },
+});
+
+const baseQueryWithReauth = async (args, api, extraOptions) => {
+  let result = await rawBaseQuery(args, api, extraOptions);
+
+  if (result?.error?.status === 401) {
+    const refreshToken = localStorage.getItem("chattu-refresh-token");
+
+    if (refreshToken) {
+      const refreshResult = await rawBaseQuery(
+        {
+          url: "user/refresh",
+          method: "POST",
+          body: { refreshToken },
+        },
+        api,
+        extraOptions
+      );
+
+      if (refreshResult?.data?.accessToken) {
+        localStorage.setItem("chattu-token", refreshResult.data.accessToken);
+        if (refreshResult?.data?.refreshToken) {
+          localStorage.setItem(
+            "chattu-refresh-token",
+            refreshResult.data.refreshToken
+          );
+        }
+
+        // retry original request
+        result = await rawBaseQuery(args, api, extraOptions);
+      } else {
+        localStorage.removeItem("chattu-token");
+        localStorage.removeItem("chattu-refresh-token");
+      }
+    }
+  }
+
+  return result;
+};
+
 const api = createApi({
   reducerPath: "api",
-  baseQuery: fetchBaseQuery({ 
-    baseUrl: `${server}/api/v1/`,
-    prepareHeaders: (headers) => {
-      const token = localStorage.getItem("chattu-token");
-      if (token) {
-        headers.set("Authorization", `Bearer ${token}`);
-      }
-      return headers;
-    },
-  }),
+  baseQuery: baseQueryWithReauth,
   tagTypes: ["Chat", "User", "Message"],
 
   endpoints: (builder) => ({
